@@ -12,13 +12,17 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
-/** 「自欺欺人」模块：只改关于本机显示。纯运行时 hook，关闭模块即还原。 */
+/** 「自欺欺人」模块：完整规则只作用于「设置」；手机管家只做游戏架构三条最小替换。 */
 public class MainHook implements IXposedHookLoadPackage {
 
-    /** 存储空间整行替换 */
+    private static final String PKG_SETTINGS = "com.android.settings";
+    private static final String PKG_PHONEMGR = "com.coloros.phonemanager";
+
+    /** true = 当前进程只做最小替换（非设置进程） */
+    private static boolean limited = false;
+
     private static final String FAKE_STORAGE = "114514 ZB / TREE(3) YB / ∞ (阿列夫一) ZB";
 
-    /** 整串规则（长串优先，避免拼出怪东西） */
     private static final String[][] FULL_RULES = {
             {"骁龙®8至尊版移动平台", "AMD Ryzen 9 9950X3D"},
             {"骁龙®8至尊版", "AMD Ryzen 9 9950X3D"},
@@ -27,7 +31,6 @@ public class MainHook implements IXposedHookLoadPackage {
             {"一加 Ace 6", "ONEPLUS NEVERSETTLE"},
     };
 
-    /** 关键词规则 */
     private static final String[][] KEY_RULES = {
             {"潮汐引擎", "中国嫦娥空间站"},
             {"风驰游戏内核", "NVIDIA GEFORCE"},
@@ -37,47 +40,54 @@ public class MainHook implements IXposedHookLoadPackage {
             {"万像素", "哈勃望远镜"},
     };
 
-    /** 电池容量行：含 mAh 整行替换 */
+    /** 最小模式只替换这三组（游戏架构） */
+    private static final String[][] MINI_RULES = {
+            {"风驰游戏内核", "NVIDIA GEFORCE"},
+            {"电竞三芯", "AMD RADEON"},
+            {"极速高刷", "INTEL IRIS XE ARC"},
+    };
+
     private static final Pattern BATTERY_LINE =
             Pattern.compile(".*mAh.*", Pattern.CASE_INSENSITIVE);
-
-    /** 运行内存行：16 / 16.0 GB */
     private static final Pattern RAM_LINE =
             Pattern.compile("^\\s*16(?:\\.0+)?\\s*GB\\s*$", Pattern.CASE_INSENSITIVE);
-
-    /** 存储卡片：真实已用 / 总容量 */
     private static final Pattern STORAGE_LINE = Pattern.compile(
             "^(.*?)\\s*/\\s*\\d+(?:\\.\\d+)?\\s*(?:GB|TB|MB|KB)\\s*$", Pattern.CASE_INSENSITIVE);
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
-        // 作用域由 res/values/arrays.xml 控制（LSPosed 按包名只注入勾选的应用）
-        XposedBridge.log("[FakeDeviceInfo] loaded in " + lp.packageName);
+        boolean isSettings = PKG_SETTINGS.equals(lp.packageName);
+        boolean isPhoneMgr = PKG_PHONEMGR.equals(lp.packageName);
+        if (!isSettings && !isPhoneMgr) return;
 
-        // 1) 资源文本路径（setText(资源ID) / getString / getText，含 Spanned）
+        limited = !isSettings; // 手机管家 -> 最小替换模式
+        XposedBridge.log("[FakeDeviceInfo] loaded in " + lp.packageName + " limited=" + limited);
+
         hookRes("getString", int.class);
         hookRes("getText", int.class);
         hookRes("getString", int.class, Object[].class);
 
-        // 2) 直接设置 CharSequence 的路径
         XposedHelpers.findAndHookMethod(TextView.class, "setText", CharSequence.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam p) {
-                Object a = p.args[0];
-                if (a == null) return;
-                String src = a.toString();
-                String dst = transform(src);
-                if (!dst.equals(src)) p.args[0] = dst;
-            }
+            @Override protected void beforeHookedMethod(MethodHookParam p) { replaceArg(p, 0); }
         });
+        XposedHelpers.findAndHookMethod(TextView.class, "setText", CharSequence.class,
+                TextView.BufferType.class, new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) { replaceArg(p, 0); }
+                });
     }
 
-    /** 资源文本 hook：String 与 CharSequence(Spanned) 都处理 */
+    private static void replaceArg(XC_MethodHook.MethodHookParam p, int idx) {
+        Object a = p.args[idx];
+        if (a == null) return;
+        String src = a.toString();
+        String dst = transform(src);
+        if (!dst.equals(src)) p.args[idx] = dst;
+    }
+
     private static void hookRes(String name, Class<?>... args) {
         try {
             XposedHelpers.findAndHookMethod(Resources.class, name, args, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
                     Object r = p.getResult();
                     if (r == null) return;
                     String s = r.toString();
@@ -92,14 +102,19 @@ public class MainHook implements IXposedHookLoadPackage {
 
     private static String transform(String s) {
         if (s == null || s.isEmpty()) return s;
-        // 归一化空格（全角 / 不换行空格）
         String out = s.replace('\u00A0', ' ').replace('\u3000', ' ').trim();
 
-        // ---- 摄像头两行（整行重写）----
+        // ---- 非「设置」进程：只做游戏架构三条最小替换 ----
+        if (limited) {
+            for (String[] r : MINI_RULES) if (out.contains(r[0])) out = out.replace(r[0], r[1]);
+            return out;
+        }
+
+        // ---- 摄像头两行 ----
         if (out.startsWith("前置")) return "前置 哈勃望远镜";
         if (out.startsWith("后置")) return "后置 詹姆斯·韦伯太空望远镜 + 中国FAST望远镜";
 
-        // ---- 电池整行 ----
+        // ---- 电池 ----
         if (BATTERY_LINE.matcher(out).matches()) return "国家电网 10kV 供电系统";
 
         // ---- 运行内存 ----
@@ -108,7 +123,7 @@ public class MainHook implements IXposedHookLoadPackage {
         // ---- 充电 ----
         if (out.contains("闪充")) return "100KW 爆炸闪充";
 
-        // ---- 型号 / 软件版本（顺序不能反！先精确匹配型号）----
+        // ---- 型号 / 软件版本 ----
         if (out.equals("PLQ110")) return "N+1";
         if (out.contains("PLQ110")) return "MOSS 550W 特别特工性能版";
         if (out.matches("^\\(CN\\d+[\\s\\S]*\\)$")) return " ";
@@ -116,7 +131,7 @@ public class MainHook implements IXposedHookLoadPackage {
         // ---- 屏幕 ----
         if (out.contains("英寸") || out.contains("高刷屏")) return "全息投影 无极赫兹";
 
-        // ---- 通用整串 / 关键词替换 ----
+        // ---- 通用替换 ----
         for (String[] r : FULL_RULES) if (out.contains(r[0])) out = out.replace(r[0], r[1]);
         for (String[] r : KEY_RULES) if (out.contains(r[0])) out = out.replace(r[0], r[1]);
 
@@ -124,7 +139,6 @@ public class MainHook implements IXposedHookLoadPackage {
             out = out.replaceAll("\\d+", "").replaceAll("\\s{2,}", " ").trim();
         }
 
-        // ---- 存储空间整行 ----
         Matcher m = STORAGE_LINE.matcher(out);
         if (m.matches()) out = FAKE_STORAGE;
 
