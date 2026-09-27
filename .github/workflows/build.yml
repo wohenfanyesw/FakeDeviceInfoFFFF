@@ -19,8 +19,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install SDK components
-        run: yes | sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Accept SDK licenses and ensure platform
+        continue-on-error: true
+        run: |
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager 2>/dev/null | head -1)
+          echo "sdkmanager = $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" >/dev/null 2>&1 || true
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
