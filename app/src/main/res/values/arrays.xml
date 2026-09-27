@@ -2,5 +2,8 @@
 <resources>
     <string-array name="xposed_scope">
         <item>com.android.settings</item>
+        <item>com.coloros.phonemanager</item>
+        <item>com.oplus.games</item>
+        <item>com.oplus.about</item>
     </string-array>
 </resources>
