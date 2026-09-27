@@ -12,7 +12,7 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
-/** 「自欺欺人」模块：只改 com.android.settings（关于本机）显示。纯运行时 hook，关闭模块即还原。 */
+/** 「自欺欺人」模块：只改关于本机显示。纯运行时 hook，关闭模块即还原。 */
 public class MainHook implements IXposedHookLoadPackage {
 
     /** 存储空间整行替换 */
@@ -49,13 +49,9 @@ public class MainHook implements IXposedHookLoadPackage {
     private static final Pattern STORAGE_LINE = Pattern.compile(
             "^(.*?)\\s*/\\s*\\d+(?:\\.\\d+)?\\s*(?:GB|TB|MB|KB)\\s*$", Pattern.CASE_INSENSITIVE);
 
-    /** 软件版本行（PLQ110_...） */
-    private static final Pattern VERSION_LINE =
-            Pattern.compile(".*PLQ110.*", Pattern.CASE_INSENSITIVE);
-
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
-        if (!"com.android.settings".equals(lp.packageName)) return;
+        // 作用域由 res/values/arrays.xml 控制（LSPosed 按包名只注入勾选的应用）
         XposedBridge.log("[FakeDeviceInfo] loaded in " + lp.packageName);
 
         // 1) 资源文本路径（setText(资源ID) / getString / getText，含 Spanned）
@@ -114,8 +110,8 @@ public class MainHook implements IXposedHookLoadPackage {
 
         // ---- 型号 / 软件版本（顺序不能反！先精确匹配型号）----
         if (out.equals("PLQ110")) return "N+1";
-        if (VERSION_LINE.matcher(out).matches()) return "MOSS 550W 特别特工性能版";
-        if (out.matches("^\\(CN\\d+.*\\)$")) return " ";
+        if (out.contains("PLQ110")) return "MOSS 550W 特别特工性能版";
+        if (out.matches("^\\(CN\\d+[\\s\\S]*\\)$")) return " ";
 
         // ---- 屏幕 ----
         if (out.contains("英寸") || out.contains("高刷屏")) return "全息投影 无极赫兹";
